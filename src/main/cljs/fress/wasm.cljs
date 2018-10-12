@@ -52,7 +52,7 @@
               [(r/readObject rdr)]
               [nil (r/readObject rdr)])
         bytes_read (rawIn/getBytesRead (get rdr :raw-in))]
-    ((.. Mod -exports -fress_dealloc) ptr bytes_read)
+    (dealloc Mod ptr bytes_read)
     ret))
 
 (defonce ^:private _buffer (buf/with-capacity 128))
@@ -73,7 +73,7 @@
         _ (binding [w/*stringify-keys* (or ^boolean w/*stringify-keys* ^boolean stringify-keys)]
             (w/writeObject writer obj))
         byte-length (buf/getBytesWritten _buffer)
-        ptr ((.. Mod -exports -fress_alloc) byte-length)
+        ptr (.-ptr (alloc Mod byte-length))
         view (get-view Mod)]
     (buf/flushTo _buffer view ptr)
     (buf/reset _buffer)
@@ -85,7 +85,7 @@
    => FatPtr<pointer, length>"
   [Mod bytes]
   (assert (goog.isArrayLike bytes))
-  (let [ptr ((.. Mod -exports -fress_alloc) (alength bytes))
+  (let [ptr (alloc Mod (alength bytes))
         view (get-view Mod)]
     (.set view bytes ptr)
     (FatPtr. ptr (alength bytes))))
@@ -117,7 +117,7 @@
      ([Mod export-name] (module-call Mod export-name sentinel))
      ([Mod export-name obj]
       (assert (string? export-name))
-      (if-let [f (goog.object.get (.-exports Mod) export-name nil)]
+      (if-let [f (goog.object.get (get-exports Mod) export-name nil)]
         (try
           (if (identical? obj sentinel)
             (if-let [ptr (f)]
@@ -146,22 +146,26 @@
   (let []
     (specify! Mod
       IFressWasmModule
-      (get-exports [_] (.-exports Mod))
+      (get-exports [_] (goog.object.get Mod "exports"))
       (get-memory [_]
-        (or (.. Mod -exports -memory) (.. Mod -imports -env -memory)))
+        ; (or (.. Mod -exports -memory) (.. Mod -imports -env -memory))
+        (goog.object.getValueByKeys Mod "exports" "memory"))
       (get-view [this]
         (js/Uint8Array. (.-buffer (get-memory this))))
-      (alloc [_ byte-length] ;=> FatPtr
-        (let [ptr ((.. Mod -exports -fress_alloc) byte-length)]
+      (alloc [this byte-length] ;=> FatPtr
+        (let [; ptr ((.. Mod -exports -fress_alloc) byte-length)
+              ptr ((goog.object.getValueByKeys Mod "exports" "fress_alloc") byte-length)]
           (FatPtr. ptr byte-length)))
       (dealloc
        ([Mod fptr]
         (assert (instance? FatPtr fptr) "fress.wasm/dealloc arity-2 requires a FatPtr")
-        ((.. Mod -exports -fress_dealloc) (.-ptr fptr) (.-len fptr)))
+        ; ((.. Mod -exports -fress_dealloc) (.-ptr fptr) (.-len fptr))
+        ((goog.object.getValueByKeys Mod "exports" "fress_dealloc") (.-ptr fptr) (.-len fptr)))
        ([Mod ptr len]
          (assert (util/valid-pointer? ptr) (str "dealloc given invalid pointer : '" (pr-str ptr) "'"))
          (assert (and (number? len) (int? len) (<= 0 len)) (str "dealloc given bad length: '" (pr-str len) "'"))
-         ((.. Mod -exports -fress_dealloc) ptr len)))
+         ; ((.. Mod -exports -fress_dealloc) ptr len)
+         ((goog.object.getValueByKeys Mod "exports" "fress_dealloc") ptr len)))
       (copy-bytes [this ptr len] ;=> u8-array
         (assert (util/valid-pointer? ptr) (str "copy-bytes given invalid pointer : '" (pr-str ptr) "'"))
         (assert (and (number? len) (int? len) (<= 0 len)) (str "copy-bytes given bad length: '" (pr-str len) "'"))
@@ -182,7 +186,7 @@
        ([Mod export-name obj] (module-call Mod export-name obj))))))
 
 (defn assert-fress-mod! [Mod]
-  (assert (instance? js/WebAssembly.Instance Mod))
+  ; (assert (instance? js/WebAssembly.Instance Mod))
   (assert (some? (.. Mod -exports -fress_init)))
   (assert (some? (.. Mod -exports -fress_alloc)))
   (assert (some? (.. Mod -exports -fress_dealloc)))
@@ -190,6 +194,7 @@
 
 (defn- panic-hook [ptr] (reset! _panic_ptr ptr))
 
+;; need instantiate-streaming support
 (defn instantiate
   "Instantiate a wasm module and add the IFressWasmModule protocol.
     + opts
@@ -206,16 +211,20 @@
   ([array-buffer] (instantiate array-buffer nil)) ; {"fn-name" -> fn}
   ([array-buffer opts]
    (let [base #js{"js_panic_hook" panic-hook}]
+     ;; assert array buffer...
      (doseq [[id f] (get opts :imports)]
        (goog.object.set base (name id) f))
      (js/Promise.
       (fn [_resolve reject]
-        (.then (js/WebAssembly.instantiate array-buffer #js{"env" base})
+        (.then ((goog.object.get js/WebAssembly "instantiate") array-buffer #js{"env" base})
+               ; (js/WebAssembly.instantiate array-buffer #js{"env" base})
                (fn [module]
                  (try
-                   (assert-fress-mod! (.-instance module))
-                   (let [Mod (attach-protocol! (.-instance module) opts)]
-                     ((.. Mod -exports -fress_init))
+                   ; (assert-fress-mod! (.-instance module))
+                   (let [; Mod (attach-protocol! (.-instance module) opts)
+                         Mod (attach-protocol! (goog.object.get module "instance") opts)]
+                     ; ((.. Mod -exports -fress_init))
+                     ((goog.object.getValueByKeys Mod "exports" "fress_init"))
                      (_resolve Mod))
                    (catch js/Error e
                      (reject e))))
