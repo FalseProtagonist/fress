@@ -14,6 +14,8 @@
                    [fress.impl bytestream]
                    [java.io InputStream OutputStream EOFException])))
 
+(println "NEW FRESS SAGE")
+
 #?(:clj (set! *warn-on-reflection* true))
 
 #?(:clj
@@ -197,13 +199,21 @@
 (defn write-object
   "Write a single object to a fressian writer."
   ([writer o]
+  ;;  (println "marc-deb in api write-object")
    (assert (fressian-writer? writer))
+  ;;  (println "marc-deb passed assert")
    #?(:clj (fressian/write-object writer o)
-      :cljs (w/writeObject writer o)))
+      :cljs (do 
+              ;; (println "marc-debabout to writeObject no cache writer " writer)
+              (w/writeObject writer o))))
   ([writer o cache?]
    (assert (fressian-writer? writer))
+  ;;  (println "marc-deb passed assert")
    #?(:clj (.writeObject ^FressianWriter writer o (boolean cache?))
-      :cljs (w/writeObject writer o cache?))))
+      :cljs (do
+              ;; (println "marc-deb about to writeObject cache writer " writer)
+              (w/writeObject writer o cache?)
+              ))))
 
 (defn write-utf8
   "write a string as raw utf-8 bytes"

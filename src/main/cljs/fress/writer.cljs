@@ -7,6 +7,8 @@
             [fress.impl.hopmap :as hop]
             [fress.util :as util :refer [log dbg]]))
 
+(println "in fress.writer")
+
 (def ^:dynamic *write-raw-utf8* false)
 (def ^:dynamic *write-utf8-tag* false)
 (def ^:dynamic *stringify-keys* false)
@@ -38,12 +40,14 @@
   (beginClosedList ^FressianWriter [this])
   (endList ^FressianWriter [this]))
 
+(declare FressianWriter)
+
 (defn ^number bit-switch
   "@return {number} bits not needed to represent this number"
   [l]
   (- 64 (.-length (.toString (.abs js/Math l) 2))))
 
-(defn internalWriteInt [wtr ^number n]
+(defn internalWriteInt [^FressianWriter wtr ^number n]
   (let [s (bit-switch n)
         raw (.-raw-out wtr)]
     (cond
@@ -91,7 +95,7 @@
       :else
       (throw (js/Error. (str "cannot write unsafe integer: " (pr-str n)))))))
 
-(defn internalWriteFooter [wrt ^number length]
+(defn internalWriteFooter [^FressianWriter wrt ^number length]
   (let [raw-out (.-raw-out wrt)]
     (rawOut/writeRawInt32 raw-out codes/FOOTER_MAGIC)
     (rawOut/writeRawInt32 raw-out length)
@@ -100,7 +104,7 @@
 (defn writeRawUTF8
   "We can use native TextEncoder to remove some dirty work, also chunking is
    pointless for WASM."
-  [this ^string s]
+  [^FressianWriter this ^string s]
   (assert (string? s))
   (let [bytes (.encode util/TextEncoder s)
         length (.-byteLength bytes)]
@@ -141,7 +145,7 @@
                   (aset buf (+ buffer-pos 2) (bit-or 0x80 (bit-and (>>> ch 0)  0x3f)))))
             (recur (inc string-pos) (+ buffer-pos encoding-size))))))))
 
-(defn defaultWriteString [this s]
+(defn defaultWriteString [^FressianWriter this s]
   (let [max-buf-needed (min (* (count s) 3) 65536)
         string-buffer (js/Int8Array. (js/ArrayBuffer. max-buf-needed))]
     (loop [[string-pos buf-pos] (buffer-string-chunk-utf8 s 0 string-buffer)]
@@ -219,8 +223,8 @@
             (writeCount this ranges/BYTE_CHUNK_SIZE)
             (rawOut/writeRawBytes raw-out bytes off ranges/BYTE_CHUNK_SIZE)
             (recur
-              (- len ranges/BYTE_CHUNK_SIZE)
-              (+ off ranges/BYTE_CHUNK_SIZE)))
+             (- len ranges/BYTE_CHUNK_SIZE)
+             (+ off ranges/BYTE_CHUNK_SIZE)))
           (do
             (writeCode this codes/BYTES)
             (writeCount this len)
@@ -232,14 +236,28 @@
       (writeRawUTF8 this s)
       (defaultWriteString this s)))
 
-  (writeObject [this o] (writeAs this nil o))
-  (writeObject [this o cache?] (writeAs this nil o cache?))
+  (writeObject [this o]
+    (do
+      ;; (+ 1 1)
+                ;;  (println "in writeObject")
+                ;; ;;  (println "calling writeAs in writeObject on " o)
+      (writeAs this nil o)))
+  (writeObject [this o cache?]
+    (do
+      ;; (+ 2 3)
+                ;;  (println "in writeObject")
+                ;;  (println "calling writeAs in writeObject on " o)
+      (writeAs this nil o cache?)))
 
   (writeAs [this tag o] (writeAs this tag o false))
   (writeAs [this tag o cache?]
     (if-let [handler (lookup tag o)]
-      (doWrite- this tag o handler cache?)
-      (throw (js/Error. (str "no handler for tag :" (pr-str tag) ", type: " (pr-str (type o)))))))
+      (do
+        ;; (println "marc-deb handler " handler " found for tag " tag "obj " o)
+        (doWrite- this tag o handler cache?))
+      (do
+        (println "marc-deb no handler object " o)
+        (throw (js/Error. (str "no handler for tag :" (pr-str tag) ", type: " (pr-str (type o))))))))
 
   (getPriorityCache [this]
     (or priorityCache (let [c (hop/hopmap 16)] (set! (.-priorityCache this) c) c)))
@@ -300,7 +318,7 @@
   (beginOpenList [this]
     (if-not (zero? (rawOut/getBytesWritten raw-out))
       (throw
-        (js/Error. "openList must be called from the top level, outside any footer context."))
+       (js/Error. "openList must be called from the top level, outside any footer context."))
       (writeCode this codes/BEGIN_OPEN_LIST))
     this)
 
@@ -339,8 +357,6 @@
     (internalWriteFooter this (rawOut/getBytesWritten raw-out))
     (clearCaches this)
     this))
-
-
 
 (defn writeNumber [this ^number n]
   (if (int? n)
@@ -388,16 +404,16 @@
   (writeTag wtr "regex" 1)
   (writeString wtr (.-source re)))
 
-(defn writeUUID [wtr u]
+(defn writeUUID [^FressianWriter wtr ^cljs.core/UUID u]
   ; adapted from https://github.com/kawasima/fressian-cljs/blob/master/src/cljs/fressian_cljs/uuid.cljs
   (writeTag wtr "uuid" 1)
   (let [buf (make-array 16)
         idx (atom 0)]
     (string/replace (.toLowerCase (.-uuid u)) #"[0-9a-f]{2}"
-      (fn [oct]
-        (when (< @idx 16)
-          (aset buf @idx (js/parseInt (str "0x" oct)))
-          (swap! idx inc))))
+                    (fn [oct]
+                      (when (< @idx 16)
+                        (aset buf @idx (js/parseInt (str "0x" oct)))
+                        (swap! idx inc))))
     (writeBytes wtr (js/Uint8Array. buf))))
 
 (defn writeByteArray [wrt bytes]
@@ -489,6 +505,7 @@
       (throw (js/Error. "writing records requires corresponding entry in *record->name*")))))
 
 (defn writeRecord [w rec rec->tag]
+  ;; (println "writeRecord w " w "res " rec)
   (writeTag w "record" 2)
   (writeObject w (class-sym rec rec->tag) true)
   (writeTag w "map" 1)
@@ -542,9 +559,25 @@
 
 (defn valid-user-handlers?
   [uh]
-  (and (map? uh)
-       (every? fn? (vals uh))
-       (every? valid-handler-key? (keys uh))))
+  #_(and (or (println "map? uh " (map? uh)) (map? uh))
+       (or (println "all fn? " (every? fn? (vals uh))) (every? fn? (vals uh)))
+       (or (println "keys " (keys uh)) true)
+       (or (println "key types "
+                    (map (fn [k] (str
+                                  "k " k
+                                  " type " (type k)
+                                  " valid? " (valid-handler-key? k)
+                                  " fn? " (fn? k)
+                                  " symbol? " (symbol? k)
+                                  " called? " (k nil)))
+                         (keys uh)))
+           true)
+       (or (println "valid-handler-key? "
+                    (every? valid-handler-key? (keys uh)))
+           (every? valid-handler-key? (keys uh))))
+  (and  (map? uh)
+        (every? fn? (vals uh))
+        (every? valid-handler-key? (keys uh))))
 
 (defn valid-record->name?
   "each key should be record ctor"
@@ -553,12 +586,19 @@
        (every? fn? (keys m))
        (every? string? (vals m))))
 
+(def fress-handlers (atom []))
+
 (defn writer
   "Create a writer that combines userHandlers with the normal type handlers
    built into Fressian."
   [out & {:keys [handlers record->name checksum? offset] :as opts}]
   (when handlers (assert (valid-user-handlers? handlers)))
   (when record->name (assert (valid-record->name? record->name)))
+  ;; (println "trace on fress-handlers")
+  ;; (.trace js/console)
+  ;; (def fress-handlers handlers)
+  (swap! fress-handlers #(conj % handlers))
+  ;; (println "post fress-handlers")
   (let [lookup-fn (build-handler-lookup handlers record->name)
         checksum? (if (some? checksum?) checksum? true)
         raw-out (rawOut/raw-output out {:offset (or offset 0) :checksum? checksum?})

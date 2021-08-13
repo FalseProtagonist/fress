@@ -13,3 +13,4 @@ pom.xml
 resources/public/js*
 resources/wasm-test/target/*
 .clj-kondo
+.calva

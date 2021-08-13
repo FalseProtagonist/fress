@@ -4,6 +4,7 @@
 
 ; a hashmap that uses open-addressing,
 ; and the InterleavedIndexHopMap describes how to deal with collisions
+(declare InterleavedIndexHopMap)
 
 (defprotocol IHopMap
   (clear [this])
@@ -22,7 +23,7 @@
 (defn _get
   "@param k, non-null
    @return the integer associated with k, or -1 if not present"
-  [this k]
+  [^InterleavedIndexHopMap this k]
   (assert (some? k))
   (let [hopidx (.-hopidx this)
         keys (.-keys this)
@@ -52,7 +53,7 @@
                           (recur (+ (<< @bkt 2) 2))))))))))))
       -1)))
 
-(defn _clear [this]
+(defn _clear [^InterleavedIndexHopMap this]
   (set! (.-count this) 0)
   (dotimes [i (.-cap this)]
     (aset (.-keys this) i nil))
@@ -80,7 +81,7 @@
    assigns ints monotonically from 0
    @param k, non-null
    @return the integer associated with k"
-  [this k]
+  [^InterleavedIndexHopMap this k]
   {:pre [(some? k)] :post [int?]}
   (let [hopidx (.-hopidx this)
         keys (.-keys this)
@@ -138,7 +139,7 @@
 
 
 (defn ^number _findSlot
-  [this hash]
+  [^InterleavedIndexHopMap this hash]
   {:pre [(int? hash)] :post [int?]}
   (let [hopidx (.-hopidx this)
         cap (.-cap this)
@@ -161,7 +162,7 @@
                 (bit-and (inc bkt) mask)))))))))
 
 (defn _resize
-  [this]
+  [^InterleavedIndexHopMap this]
   (let [oldhops (.-hopidx this)]
     (set! (.-hopidx this) (i32-array (* 2 (alength oldhops))))
     (set! (.-cap this) (<< (.-cap this) 1))

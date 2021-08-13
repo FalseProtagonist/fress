@@ -8,6 +8,8 @@
 
 (def ^:dynamic *keywordize-keys* false) ;; this can be lossy!
 
+(declare FressianReader)
+
 (defrecord StructType [tag fields])
 (defrecord TaggedObject [tag value]) ;meta
 
@@ -25,7 +27,7 @@
   (readClosedList [this])
   (readOpenList [this])
   (readAndCacheObject- [this cache])
-  (lookupCache [this cache index])
+  (^StructType lookupCache [this cache index])
   (validateFooter [this] [this calculatedLength magicFromStream])
   (handleStruct- [this ^string tag fields])
   (getHandler- [this ^string tag])
@@ -33,7 +35,7 @@
   (getStructCache- [this])
   (resetCaches [this]))
 
-(defn ^string internalReadString [rdr length]
+(defn ^string internalReadString [^FressianReader rdr length]
   (let [bytes  (rawIn/readFully (.-raw-in rdr) length)
         buf (js/Array.)]
     (loop [pos 0]
@@ -69,7 +71,7 @@
         bytes (rawIn/readFully (:raw-in rdr) length)]
     (.decode util/TextDecoder bytes)))
 
-(defn ^number internalReadDouble [rdr code]
+(defn ^number internalReadDouble [^FressianReader rdr code]
   (cond
     (== code codes/DOUBLE)
     (rawIn/readRawDouble (.-raw-in rdr))
@@ -83,7 +85,7 @@
         o
         (expected rdr "double" code o)))))
 
-(defn ^number internalReadInt [rdr code]
+(defn ^number internalReadInt [^FressianReader rdr ^number code]
   (cond
     (== code 0xFF) -1
 
@@ -102,17 +104,17 @@
     (<= 0x74 code 0x77)
     (let [packing (Long.fromNumber (- code codes/INT_PACKED_5_ZERO))
           i32 (Long.fromNumber (rawIn/readRawInt32 (.-raw-in rdr)))]
-      (.toNumber (.or (.shiftLeft packing 32) i32)))
+       ^number (.toNumber (.or (.shiftLeft packing 32) i32)))
 
     (<= 0x78 code 0x7B)
     (let [packing (Long.fromNumber (- code codes/INT_PACKED_6_ZERO))
           i40 (rawIn/readRawInt40L (.-raw-in rdr))]
-      (.toNumber (.or (.shiftLeft packing 40) i40)))
+      ^number (.toNumber (.or (.shiftLeft packing 40) i40)))
 
     (<= 0x7C code 0x7F)
     (let [packing (Long.fromNumber (- code codes/INT_PACKED_7_ZERO))
           i48 (Long.fromNumber (rawIn/readRawInt48 (.-raw-in rdr)))]
-      (.toNumber (.or (.shiftLeft packing 48) i48)))
+      ^number (.toNumber (.or (.shiftLeft packing 48) i48)))
 
     (== code codes/INT)
     (rawIn/readRawInt64 (.-raw-in rdr))
@@ -129,7 +131,7 @@
 (defn ^bytes internalReadBytes
   "called on codes/BYTES"
   ;; readFully returns a view on raw memory. here we copy values to get new buffer backing
-  [rdr length]
+  [^FressianReader rdr length]
   (js/Int8Array.from (rawIn/readFully (.-raw-in rdr) length)))
 
 (defn ^bytes internalReadChunkedBytes
@@ -191,7 +193,7 @@
 (def magicL (.shiftLeft (Long.fromNumber codes/FOOTER) 24))
 
 
-(defn internalRead [rdr ^number code]
+(defn internalRead [^FressianReader rdr ^number code]
   (let []
     (cond
 
@@ -272,7 +274,7 @@
       (== code codes/FOOTER)
       (let [calculatedLength (dec (rawIn/getBytesRead (.-raw-in rdr)))
             i24L (Long.fromNumber (rawIn/readRawInt24 (.-raw-in rdr)))]
-        (validateFooter rdr calculatedLength (.toNumber (.add magicL i24L)))
+        (validateFooter rdr calculatedLength  ^number (.toNumber (.add magicL i24L)))
         (readObject rdr))
 
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
